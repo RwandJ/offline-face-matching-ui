@@ -1,48 +1,19 @@
-import { useState, useEffect } from "react";
-import * as faceapi from "face-api.js";
+import { useState } from "react";
 import "./FaceCompare.css";
+
+const API_URL = "http://127.0.0.1:8000/api/v1/face-matching/compare";
 
 export default function FaceCompare() {
   const [leftImage, setLeftImage] = useState(null);
   const [rightImage, setRightImage] = useState(null);
-  const [leftValid, setLeftValid] = useState(false);
-  const [rightValid, setRightValid] = useState(false);
-  const [error, setError] = useState("");
+  const [leftFile, setLeftFile] = useState(null);
+  const [rightFile, setRightFile] = useState(null);
+
+  const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // Load face detection model once
-  useEffect(() => {
-    const loadModels = async () => {
-      await faceapi.nets.tinyFaceDetector.loadFromUri("/models");
-    };
-    loadModels();
-  }, []);
-
-  // Face detection with confidence threshold
-  const detectFace = async (imageUrl, side) => {
-    const img = await faceapi.fetchImage(imageUrl);
-
-    const detection = await faceapi.detectSingleFace(
-      img,
-      new faceapi.TinyFaceDetectorOptions({
-        inputSize: 416,
-        scoreThreshold: 0.6, // STRICT face-only threshold
-      })
-    );
-
-    if (!detection || detection.score < 0.6) {
-      setError(`No valid human face detected in ${side} image`);
-      side === "left" ? setLeftValid(false) : setRightValid(false);
-      return;
-    }
-
-    // Valid face detected
-    setError("");
-    side === "left" ? setLeftValid(true) : setRightValid(true);
-  };
-
-  const handleImageUpload = async (e, side) => {
+  const handleImageUpload = (e, side) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -50,47 +21,66 @@ export default function FaceCompare() {
 
     if (side === "left") {
       setLeftImage(imageUrl);
-      setLeftValid(false);
+      setLeftFile(file);
     } else {
       setRightImage(imageUrl);
-      setRightValid(false);
+      setRightFile(file);
     }
 
-    await detectFace(imageUrl, side);
+    setError(null);
+    setResult(null);
   };
 
-  const handleMatch = () => {
-    if (!leftValid || !rightValid) {
-      setError("Both images must contain a clear human face");
+  const handleMatch = async () => {
+    if (!leftFile || !rightFile) {
+      setError("يرجى رفع صورتين قبل المقارنة");
       return;
     }
 
-    setError("");
     setLoading(true);
+    setError(null);
+    setResult(null);
 
-    // Placeholder logic – backend / ML will replace this
-    setTimeout(() => {
-      setResult({
-        pixel: "81%",
-        semantic: "Same Person (High Confidence)",
+    try {
+      const formData = new FormData();
+      formData.append("image1", leftFile);
+      formData.append("image2", rightFile);
+
+      const response = await fetch(API_URL, {
+        method: "POST",
+        body: formData,
       });
+
+      if (!response.ok) {
+        if (response.status === 400)
+          throw new Error("يرجى التأكد من رفع صورتين صحيحتين");
+        if (response.status === 422)
+          throw new Error("إحدى الصور لا تحتوي على وجه بشري واضح");
+        throw new Error("حدث خطأ في الخادم");
+      }
+
+      const data = await response.json();
+      setResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
       setLoading(false);
-    }, 1200);
+    }
   };
 
   return (
     <div className="compare-container">
-      <h2 className="compare-title">Face Matching (Face-Only)</h2>
+      <h2 className="compare-title">Face Matching</h2>
 
       {error && <p className="error-text">{error}</p>}
 
       <div className="compare-grid">
-        {/* IMAGE A */}
+        {/* Image A */}
         <div className="face-card">
           <h4>Image A</h4>
           <div className="image-box">
             {leftImage ? (
-              <img src={leftImage} alt="Face A" />
+              <img src={leftImage} alt="Image A" />
             ) : (
               <span>No Image</span>
             )}
@@ -100,17 +90,14 @@ export default function FaceCompare() {
             accept="image/*"
             onChange={(e) => handleImageUpload(e, "left")}
           />
-          {!leftValid && leftImage && (
-            <small className="warning-text">No valid face detected</small>
-          )}
         </div>
 
-        {/* IMAGE B */}
+        {/* Image B */}
         <div className="face-card">
           <h4>Image B</h4>
           <div className="image-box">
             {rightImage ? (
-              <img src={rightImage} alt="Face B" />
+              <img src={rightImage} alt="Image B" />
             ) : (
               <span>No Image</span>
             )}
@@ -120,27 +107,21 @@ export default function FaceCompare() {
             accept="image/*"
             onChange={(e) => handleImageUpload(e, "right")}
           />
-          {!rightValid && rightImage && (
-            <small className="warning-text">No valid face detected</small>
-          )}
         </div>
       </div>
 
-      <button
-        className="match-btn"
-        onClick={handleMatch}
-        disabled={loading}
-      >
+      <button className="match-btn" onClick={handleMatch} disabled={loading}>
         {loading ? "Matching..." : "Match Faces"}
       </button>
 
       {result && (
         <div className="result-box">
           <p>
-            <strong>Pixel Similarity:</strong> {result.pixel}
+            <strong>Match:</strong> {result.match ? "Yes" : "No"}
           </p>
           <p>
-            <strong>Semantic Result:</strong> {result.semantic}
+            <strong>Similarity:</strong>{" "}
+            {(result.similarity * 100).toFixed(1)}%
           </p>
         </div>
       )}
